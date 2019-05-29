@@ -134,13 +134,7 @@ func startPhase(
 			phaseToStart.Train.Branch, nil)
 	}
 
-	err = phaseService.Start(phaseToStart.Type,
-		phaseToStart.Train.ID,
-		phaseToStart.PhaseGroup.Delivery.ID,
-		phaseToStart.PhaseGroup.Verification.ID,
-		phaseToStart.PhaseGroup.Deploy.ID,
-		phaseToStart.Train.Branch, phaseToStart.PhaseGroup.HeadSHA,
-		user)
+	err = phaseService.Start(phaseToStart, user)
 	if err != nil {
 		logger.Error("ErrorPhase: %v", err)
 		err = dataClient.ErrorPhase(phaseToStart, err)

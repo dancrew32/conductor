@@ -51,9 +51,13 @@ var (
 	// Comma-separated list of expected jobs for the deploy phase.
 	deployJobsFlag = flags.EnvString("DEPLOY_JOBS", "")
 
+	// Comma-separated list of expected jobs for the rollback phase (Currently unused).
+	rollbackJobsFlag = flags.EnvString("ROLLBACK_JOBS", "")
+
 	DeliveryJobs     []string
 	VerificationJobs []string
 	DeployJobs       []string
+	RollbackJobs     []string
 
 	CustomDeliveryJobs     []string
 	CustomVerificationJobs []string
@@ -72,6 +76,7 @@ func parseFlags() {
 	DeliveryJobs = parseListString(deliveryJobsFlag)
 	VerificationJobs = parseListString(verificationJobsFlag)
 	DeployJobs = parseListString(deployJobsFlag)
+	RollbackJobs = parseListString(rollbackJobsFlag)
 }
 
 // Take a comma-separated string and split on commas, stripping any whitespace.

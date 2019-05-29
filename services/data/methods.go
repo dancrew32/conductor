@@ -858,7 +858,7 @@ func (d *dataClient) createPhaseGroup(train *types.Train) (*types.PhaseGroup, er
 
 /* Job */
 func (d *dataClient) CreateJob(phase *types.Phase, name string) (*types.Job, error) {
-	job := types.Job{Name: name, Phase: phase}
+	job := types.Job{Name: name, Phase: phase, State: types.JobWaiting}
 	_, err := d.Client.Insert(&job)
 	if err != nil {
 		return nil, err
@@ -867,10 +867,30 @@ func (d *dataClient) CreateJob(phase *types.Phase, name string) (*types.Job, err
 	return &job, nil
 }
 
-func (d *dataClient) StartJob(job *types.Job, url string) error {
+func (d *dataClient) TriggerJob(job *types.Job) error {
+	job.State = types.JobTriggering
+	_, err := d.Client.Update(job, "State")
+	if err == nil {
+		datadog.Info("Triggering job (ID, Name) %v, %v", job.ID, job.Name)
+	}
+	return err
+}
+
+func (d *dataClient) QueueJob(job *types.Job) error {
+	job.State = types.JobQueued
+	_, err := d.Client.Update(job, "State")
+	if err == nil {
+		datadog.Info("Queued job (ID, Name) %v, %v", job.ID, job.Name)
+	}
+	return err
+}
+
+func (d *dataClient) StartJob(job *types.Job, url string, buildID string) error {
 	job.StartedAt = types.Time{time.Now()}
 	job.URL = &url
-	_, err := d.Client.Update(job, "StartedAt", "URL")
+	job.BuildID = &buildID
+	job.State = types.JobBuilding
+	_, err := d.Client.Update(job, "StartedAt", "URL", "BuildID", "State")
 	if err == nil {
 		datadog.Info("Started job (ID, Name) %v, %v", job.ID, job.Name)
 	}
@@ -882,7 +902,8 @@ func (d *dataClient) CompleteJob(job *types.Job, result types.JobResult, metadat
 	job.CompletedAt = types.Time{time.Now()}
 	job.Result = result
 	job.Metadata = metadata
-	_, err := d.Client.Update(job, "CompletedAt", "Result", "Metadata")
+	job.State = types.JobDone
+	_, err := d.Client.Update(job, "CompletedAt", "Result", "Metadata", "State")
 	if err == nil {
 		datadog.Info("Completed job (ID, Name) %v, %v", job.ID, job.Name)
 	}

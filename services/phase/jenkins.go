@@ -4,16 +4,9 @@ import (
 	"strconv"
 
 	"github.com/Nextdoor/conductor/services/build"
-	"github.com/Nextdoor/conductor/shared/flags"
+	"github.com/Nextdoor/conductor/services/data"
 	"github.com/Nextdoor/conductor/shared/settings"
 	"github.com/Nextdoor/conductor/shared/types"
-)
-
-var (
-	// These are the names of the Jenkins jobs which will kick off each phase.
-	jenkinsDeliveryJob     = flags.EnvString("JENKINS_DELIVERY_JOB", "")
-	jenkinsVerificationJob = flags.EnvString("JENKINS_VERIFICATION_JOB", "")
-	jenkinsDeployJob       = flags.EnvString("JENKINS_DEPLOY_JOB", "")
 )
 
 type jenkinsPhase struct{}
@@ -22,17 +15,11 @@ func newJenkins() *jenkinsPhase {
 	return &jenkinsPhase{}
 }
 
-func (p *jenkinsPhase) Start(phaseType types.PhaseType, trainID,
-	deliveryPhaseID, verificationPhaseID, deployPhaseID uint64, branch, sha string,
-	buildUser *types.User) error {
-
+func (p *jenkinsPhase) Start(phase *types.Phase, buildUser *types.User) error {
 	params := make(map[string]string)
-	params["TRAIN_ID"] = strconv.FormatUint(trainID, 10)
-	params["DELIVERY_PHASE_ID"] = strconv.FormatUint(deliveryPhaseID, 10)
-	params["VERIFICATION_PHASE_ID"] = strconv.FormatUint(verificationPhaseID, 10)
-	params["DEPLOY_PHASE_ID"] = strconv.FormatUint(deployPhaseID, 10)
-	params["BRANCH"] = branch
-	params["SHA"] = sha
+	params["TRAIN_ID"] = strconv.FormatUint(phase.Train.ID, 10)
+	params["BRANCH"] = phase.Train.Branch
+	params["SHA"] = phase.PhaseGroup.HeadSHA
 	params["CONDUCTOR_HOSTNAME"] = settings.GetHostname()
 	if buildUser != nil {
 		params["BUILD_USER"] = buildUser.Name
@@ -40,19 +27,47 @@ func (p *jenkinsPhase) Start(phaseType types.PhaseType, trainID,
 		params["BUILD_USER"] = "Conductor"
 	}
 
-	var job string
-	switch phaseType {
+	var workflow Workflow
+	switch phase.Type {
 	case types.Delivery:
-		job = jenkinsDeliveryJob
+		workflow = deliveryWorkflow
 	case types.Verification:
-		job = jenkinsVerificationJob
+		workflow = verificationWorkflow
 	case types.Deploy:
-		job = jenkinsDeployJob
+		workflow = deployWorkflow
 	}
 
-	if job == "" {
+	if len(workflow.Stages) == 0 {
 		return nil
 	}
 
-	return build.Jenkins().TriggerJob(job, params)
+	// Trigger stage 1.
+	stage := workflow.Stages[0]
+	if len(stage.Jobs) == 0 {
+		return nil
+	}
+
+	for _, jobName := range stage.Jobs {
+		var jobToTrigger *types.Job = nil
+		for _, job := range phase.Jobs {
+			if job.Name == jobName {
+				jobToTrigger = job
+				break
+			}
+		}
+		if jobToTrigger == nil {
+			data.Client()
+		}
+
+		go build.Jenkins().TriggerJob(jobToTrigger, params)
+	}
+
+	return nil
 }
+
+// There are two different polling operations - One is polling known jobs for the currently active phase
+// (also other running phases? How do we know all the currently running phases?), the other is polling for new jobs.
+// What if we just poll all the currently running jobs from the jobs defined in the workflows + the jobs defined in the expected job list.
+// Do we need to do workflows + expected jobs?
+// Can we just use expected jobs?
+// The UI is based on expected jobs... phase transitions are based on expected jobs... but it tracks and triggers the workflows separately.

@@ -75,7 +75,12 @@ type PhaseGroup struct {
 }
 
 type Job struct {
-	ID          uint64    `orm:"pk;auto;column(id)" json:"id,string"`
+	ID      uint64  `orm:"pk;auto;column(id)" json:"id,string"`
+	BuildID *string `orm:"null" json:"build_id"`
+
+	State                     JobState `orm:"null" json:"state"` // Waiting -> Triggering -> Queued -> Building -> Done
+	StateTransitionRetryCount uint64   `orm:"null" json:"state"`
+
 	StartedAt   Time      `orm:"null" json:"started_at"`
 	CompletedAt Time      `orm:"null" json:"completed_at"`
 	URL         *string   `orm:"column(url);null" json:"url"` // Link to this job
@@ -136,7 +141,7 @@ func (_ *Ticket) TableUnique() [][]string {
 	return [][]string{
 		// Unique constraint on key + train id.
 		// Ticket might be shared between trains, but the same ticket should never be on the same train twice.
-		[]string{"Key", "Train"},
+		{"Key", "Train"},
 	}
 }
 

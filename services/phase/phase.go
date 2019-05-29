@@ -3,15 +3,10 @@ package phase
 
 import (
 	"fmt"
-	"io/ioutil"
-	"net/http"
-	"net/url"
-	"strconv"
-	"strings"
 	"sync"
 	"time"
 
-	"github.com/Nextdoor/conductor/services/auth"
+	"github.com/Nextdoor/conductor/services/data"
 	"github.com/Nextdoor/conductor/shared/flags"
 	"github.com/Nextdoor/conductor/shared/logger"
 	"github.com/Nextdoor/conductor/shared/types"
@@ -22,9 +17,7 @@ var (
 )
 
 type Service interface {
-	Start(phaseType types.PhaseType, trainID,
-		deliveryPhaseID, verificationPhaseID, deployPhaseID uint64, branch, sha string,
-		buildUser *types.User) error
+	Start(phase *types.Phase, buildUser *types.User) error
 }
 
 type Completeable interface {
@@ -80,59 +73,57 @@ func newFake() *fake {
 	return &fake{}
 }
 
-func (p *fake) Start(phaseType types.PhaseType, trainID,
-	deliveryPhaseID, verificationPhaseID, deployPhaseID uint64, branch, sha string,
-	buildUser *types.User) error {
-	switch phaseType {
+func (p *fake) Start(phase *types.Phase, buildUser *types.User) error {
+	switch phase.Type {
 	case types.Delivery:
-		return fakeDelivery(trainID, deliveryPhaseID, verificationPhaseID, deployPhaseID)
+		return fakeDelivery(phase.Train.ID)
 	case types.Verification:
-		return fakeVerification(trainID, deliveryPhaseID, verificationPhaseID, deployPhaseID)
+		return fakeVerification(phase.Train.ID)
 	case types.Deploy:
-		return fakeDeploy(trainID, deliveryPhaseID, verificationPhaseID, deployPhaseID)
+		return fakeDeploy(phase.Train.ID)
 	}
 	return nil
 }
 
-func fakeDelivery(trainID, deliveryPhaseID, verificationPhaseID, _ uint64) error {
+func fakeDelivery(trainID uint64) error {
 	logger.Info("Starting fake delivery phase...")
 	waitGroup := sync.WaitGroup{}
 	waitGroup.Add(1)
 	defer waitGroup.Wait()
 	go func() {
 		defer waitGroup.Done()
-		err := fakeJobRun("verification-1", trainID, verificationPhaseID, 0, time.Duration(0), time.Second*1)
+		err := fakeJobRun("verification-1", trainID, 0, time.Duration(0), time.Second*1)
 		if err != nil {
 			logger.Error("%v", err)
 		}
 	}()
-	err := fakeJobRun("delivery-1", trainID, deliveryPhaseID, 0, time.Duration(0), time.Second*1)
+	err := fakeJobRun("delivery-1", trainID, 0, time.Duration(0), time.Second*1)
 	if err != nil {
 		return err
 	}
-	err = fakeJobRun("delivery-2", trainID, deliveryPhaseID, 0, time.Duration(0), time.Second*1)
+	err = fakeJobRun("delivery-2", trainID, 0, time.Duration(0), time.Second*1)
 	if err != nil {
 		return err
 	}
-	err = fakeJobRun("delivery-3", trainID, deliveryPhaseID, 0, time.Duration(0), time.Second*1)
+	err = fakeJobRun("delivery-3", trainID, dataClient, 0, time.Duration(0), time.Second*1)
 	if err != nil {
 		return err
 	}
 	return nil
 }
 
-func fakeVerification(trainID, _, verificationPhaseID, _ uint64) error {
+func fakeVerification(trainID uint64) error {
 	logger.Info("Starting fake verification phase...")
-	err := fakeJobRun("verification-2", trainID, verificationPhaseID, 0, time.Duration(0), time.Second*5)
+	err := fakeJobRun("verification-2", trainID, 0, time.Duration(0), time.Second*5)
 	if err != nil {
 		return err
 	}
 	return nil
 }
 
-func fakeDeploy(trainID, _, _, deployPhaseID uint64) error {
+func fakeDeploy(trainID uint64) error {
 	logger.Info("Starting fake deploy phase...")
-	err := fakeJobRun("deploy-1", trainID, deployPhaseID, 0, time.Duration(0), time.Second*5)
+	err := fakeJobRun("deploy-1", trainID, 0, time.Duration(0), time.Second*5)
 	if err != nil {
 		return err
 	}
@@ -142,77 +133,87 @@ func fakeDeploy(trainID, _, _, deployPhaseID uint64) error {
 	defer waitGroup.Wait()
 	go func() {
 		defer waitGroup.Done()
-		fakeJobRun("deploy-2", trainID, deployPhaseID, 0, time.Duration(0), time.Second*5)
+		err = fakeJobRun("deploy-2", trainID, 0, time.Duration(0), time.Second*5)
 		if err != nil {
 			logger.Error("%v", err)
 		}
 	}()
 
-	err = fakeJobRun("deploy-3", trainID, deployPhaseID, 0, time.Duration(0), time.Second*8)
+	err = fakeJobRun("deploy-3", trainID, 0, time.Duration(0), time.Second*8)
 	if err != nil {
 		return err
 	}
 	return nil
 }
 
-func fakeJobRun(jobName string, trainID, phaseID, result uint64,
+func fakeJobRun(jobName string, trainID uint64, result uint64,
 	startDelay time.Duration, runtime time.Duration) error {
 	time.Sleep(startDelay)
-	err := fakeStartJob(jobName, trainID, phaseID)
+	err := fakeStartJob(jobName, trainID)
 	if err != nil {
 		return err
 	}
 	time.Sleep(runtime)
-	err = fakeCompleteJob(jobName, trainID, phaseID, result)
+	err = fakeCompleteJob(jobName, trainID, result)
 	if err != nil {
 		return err
 	}
 	return nil
 }
 
-func fakeStartJob(jobName string, trainID, phaseID uint64) error {
-	jobForm := url.Values{
-		"name": []string{jobName},
-		"url":  []string{fmt.Sprintf("http://job.com/%s", jobName)},
-	}
-	path := fmt.Sprintf("http://localhost/api/train/%d/phase/%d/job", trainID, phaseID)
-	req, err := http.NewRequest("POST", path, strings.NewReader(jobForm.Encode()))
-	if err != nil {
-		return err
-	}
+func fakeStartJob(jobName string, trainID uint64) error {
+	/*
+		TODO (Fix fake job)
+		// These should use dataClient similarly to TriggerJob.
 
-	req.AddCookie(auth.NewCookie("robot"))
-	req.Header.Add("Content-Type", "application/x-www-form-urlencoded")
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		logger.Error("%v", err)
-		if resp != nil {
-			body, _ := ioutil.ReadAll(resp.Body)
-			logger.Error("Body: %s", string(body))
+		jobForm := url.Values{
+			"name": []string{jobName},
+			"url":  []string{fmt.Sprintf("http://job.com/%s", jobName)},
 		}
-		return err
-	}
+		path := fmt.Sprintf("http://localhost/api/train/%d/phase/%d/job", trainID, phaseID)
+		req, err := http.NewRequest("POST", path, strings.NewReader(jobForm.Encode()))
+		if err != nil {
+			return err
+		}
+
+		req.AddCookie(auth.NewCookie("robot"))
+		req.Header.Add("Content-Type", "application/x-www-form-urlencoded")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			logger.Error("%v", err)
+			if resp != nil {
+				body, _ := ioutil.ReadAll(resp.Body)
+				logger.Error("Body: %s", string(body))
+			}
+			return err
+		}
+	*/
 	return nil
 }
 
-func fakeCompleteJob(jobName string, trainID, phaseID, result uint64) error {
-	resultForm := url.Values{"result": []string{strconv.FormatUint(result, 10)}}
-	path := fmt.Sprintf("http://localhost/api/train/%d/phase/%d/job/%s", trainID, phaseID, jobName)
-	req, err := http.NewRequest("POST", path, strings.NewReader(resultForm.Encode()))
-	if err != nil {
-		return err
-	}
+func fakeCompleteJob(jobName string, trainID uint64, result uint64) error {
+	/*
+		TODO (Fix fake job)
+		// These should use dataClient similarly to TriggerJob.
 
-	req.AddCookie(auth.NewCookie("robot"))
-	req.Header.Add("Content-Type", "application/x-www-form-urlencoded")
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		logger.Error("%v", err)
-		if resp != nil {
-			body, _ := ioutil.ReadAll(resp.Body)
-			logger.Error("Body: %s", string(body))
+		resultForm := url.Values{"result": []string{strconv.FormatUint(result, 10)}}
+		path := fmt.Sprintf("http://localhost/api/train/%d/phase/%d/job/%s", trainID, phaseID, jobName)
+		req, err := http.NewRequest("POST", path, strings.NewReader(resultForm.Encode()))
+		if err != nil {
+			return err
 		}
-		return err
-	}
+
+		req.AddCookie(auth.NewCookie("robot"))
+		req.Header.Add("Content-Type", "application/x-www-form-urlencoded")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			logger.Error("%v", err)
+			if resp != nil {
+				body, _ := ioutil.ReadAll(resp.Body)
+				logger.Error("Body: %s", string(body))
+			}
+			return err
+		}
+	*/
 	return nil
 }

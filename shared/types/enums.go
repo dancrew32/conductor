@@ -75,6 +75,19 @@ func PhaseTypeFromString(phaseType string) (PhaseType, error) {
 	}
 }
 
+type JobState string
+
+const (
+	JobWaiting    JobState = "Waiting"
+	JobTriggering JobState = "Triggering"
+	JobQueued     JobState = "Queued"
+	JobBuilding   JobState = "Building"
+	JobDone       JobState = "Done"
+	// How do we get out of this state? What's the process?
+	// Start entire workflow again... or restart whole train? Extend? Probably. This is exceptional case.
+	JobFatalError JobState = "FatalError"
+)
+
 type JobResult int
 
 const (

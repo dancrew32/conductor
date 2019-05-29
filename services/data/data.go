@@ -54,7 +54,9 @@ type Client interface {
 	ReplacePhase(*types.Phase) (*types.Phase, error)
 
 	CreateJob(*types.Phase, string) (*types.Job, error)
-	StartJob(*types.Job, string) error
+	TriggerJob(*types.Job) error
+	QueueJob(*types.Job) error
+	StartJob(*types.Job, string, string) error
 	CompleteJob(*types.Job, types.JobResult, string) error
 	RestartJob(*types.Job, string) error
 
